@@ -3,7 +3,7 @@
  * Plugin Name: گردونه شانس حرفه‌ای
  * Plugin URI: https://github.com/sahandse/lucky-wheel-pro
  * Description: گردونه شانس وردپرس و ووکامرس با مدیریت جایزه، احتمال برد، موجودی، کمپین و محدودیت خرید.
- * Version: 1.0.0
+ * Version: 1.0.1
  * Author: Sahand Rezvan
  * Author URI: https://github.com/sahandse
  * Text Domain: lucky-wheel-pro
@@ -14,7 +14,7 @@
 defined('ABSPATH') || exit;
 
 final class LWP_Plugin {
-    const VERSION = '1.0.0';
+    const VERSION = '1.0.1';
     const OPTION  = 'lwp_settings';
 
     public function __construct() {
@@ -81,6 +81,10 @@ final class LWP_Plugin {
     }
 
     public function admin_menu() {
+        if (function_exists('s_store_register_submenu')) {
+            s_store_register_submenu('lucky-wheel-pro', 'گردونه شانس', [$this, 'settings_page'], 'manage_options', 'گردونه شانس');
+            return;
+        }
         add_menu_page(
             'گردونه شانس حرفه‌ای',
             'گردونه شانس',
