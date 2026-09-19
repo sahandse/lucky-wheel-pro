@@ -25,7 +25,6 @@ final class LWP_Plugin {
         add_action('wp_ajax_lwp_spin', [$this, 'ajax_spin']);
         add_action('wp_ajax_nopriv_lwp_spin', [$this, 'ajax_spin']);
         add_action('admin_post_lwp_export_csv', [$this, 'export_csv']);
-        add_action('elementor/widgets/register', [$this, 'register_elementor_widget']);
     }
 
     public function defaults() {
@@ -295,19 +294,6 @@ final class LWP_Plugin {
         echo '</tbody></table></div>';
     }
 
-    public function register_elementor_widget($widgets_manager) {
-        if(!class_exists('Elementor\\Widget_Base')) return;
-        if(!class_exists('LWP_Elementor_Widget')){
-            class LWP_Elementor_Widget extends \Elementor\Widget_Base {
-                public function get_name(){ return 'lucky_wheel_pro'; }
-                public function get_title(){ return 'گردونه شانس'; }
-                public function get_icon(){ return 'eicon-site-identity'; }
-                public function get_categories(){ return ['general']; }
-                protected function render(){ echo do_shortcode('[lucky_wheel_pro]'); }
-            }
-        }
-        $widgets_manager->register(new LWP_Elementor_Widget());
-    }
 
     public function export_csv() {
         if(!current_user_can('manage_options')) wp_die('دسترسی غیرمجاز');
@@ -322,3 +308,17 @@ final class LWP_Plugin {
 }
 
 new LWP_Plugin();
+
+add_action('elementor/widgets/register', function($widgets_manager){
+    if(!class_exists('Elementor\\Widget_Base')) return;
+    if(!class_exists('LWP_Elementor_Widget')){
+        class LWP_Elementor_Widget extends \Elementor\Widget_Base {
+            public function get_name(){ return 'lucky_wheel_pro'; }
+            public function get_title(){ return 'گردونه شانس'; }
+            public function get_icon(){ return 'eicon-site-identity'; }
+            public function get_categories(){ return ['general']; }
+            protected function render(){ echo do_shortcode('[lucky_wheel_pro]'); }
+        }
+    }
+    $widgets_manager->register(new LWP_Elementor_Widget());
+});
