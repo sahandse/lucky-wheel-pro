@@ -14,7 +14,7 @@
 defined('ABSPATH') || exit;
 
 final class LWP_Plugin {
-    const VERSION = '1.0.1';
+    const VERSION = '1.1.1';
     const OPTION  = 'lwp_settings';
 
     public function __construct() {
