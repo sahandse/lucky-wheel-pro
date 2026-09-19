@@ -25,6 +25,7 @@ final class LWP_Plugin {
         add_action('wp_ajax_lwp_spin', [$this, 'ajax_spin']);
         add_action('wp_ajax_nopriv_lwp_spin', [$this, 'ajax_spin']);
         add_action('admin_post_lwp_export_csv', [$this, 'export_csv']);
+        add_action('elementor/widgets/register', [$this, 'register_elementor_widget']);
     }
 
     public function defaults() {
@@ -279,6 +280,10 @@ final class LWP_Plugin {
         if(count($logs)>2000) $logs=array_slice($logs,-2000);
         update_option('lwp_spin_logs',$logs,false);
 
+        if($mobile){
+            apply_filters('s_store_sms_send',null,$mobile,'تبریک! شما در گردونه شانس «'.$prize['title'].'» برنده شدید.','lucky-wheel');
+        }
+
         wp_send_json_success(['prize'=>$prize['title'],'message'=>'تبریک! '.$prize['title'].' برنده شدید.']);
     }
 
@@ -288,6 +293,20 @@ final class LWP_Plugin {
         echo '<div class="wrap"><h1>گزارش گردونه شانس</h1><p><a class="button" href="'.esc_url(wp_nonce_url(admin_url('admin-post.php?action=lwp_export_csv'),'lwp_export_csv')).'">خروجی CSV</a></p><table class="widefat striped"><thead><tr><th>زمان</th><th>موبایل</th><th>جایزه</th><th>کاربر</th></tr></thead><tbody>';
         foreach(array_slice($logs,0,500) as $x) echo '<tr><td>'.esc_html($x['time']).'</td><td>'.esc_html($x['mobile']).'</td><td>'.esc_html($x['prize']).'</td><td>'.esc_html($x['user_id']).'</td></tr>';
         echo '</tbody></table></div>';
+    }
+
+    public function register_elementor_widget($widgets_manager) {
+        if(!class_exists('Elementor\\Widget_Base')) return;
+        if(!class_exists('LWP_Elementor_Widget')){
+            class LWP_Elementor_Widget extends \Elementor\Widget_Base {
+                public function get_name(){ return 'lucky_wheel_pro'; }
+                public function get_title(){ return 'گردونه شانس'; }
+                public function get_icon(){ return 'eicon-site-identity'; }
+                public function get_categories(){ return ['general']; }
+                protected function render(){ echo do_shortcode('[lucky_wheel_pro]'); }
+            }
+        }
+        $widgets_manager->register(new LWP_Elementor_Widget());
     }
 
     public function export_csv() {
