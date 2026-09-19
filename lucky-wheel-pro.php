@@ -3,7 +3,7 @@
  * Plugin Name: گردونه شانس حرفه‌ای
  * Plugin URI: https://github.com/sahandse/lucky-wheel-pro
  * Description: گردونه شانس وردپرس و ووکامرس با مدیریت جایزه، احتمال برد، موجودی، کمپین و محدودیت خرید.
- * Version: 1.0.1
+ * Version: 1.2.0
  * Author: Sahand Rezvan
  * Author URI: https://github.com/sahandse
  * Text Domain: lucky-wheel-pro
@@ -14,7 +14,7 @@
 defined('ABSPATH') || exit;
 
 final class LWP_Plugin {
-    const VERSION = '1.1.1';
+    const VERSION = '1.2.0';
     const OPTION  = 'lwp_settings';
 
     public function __construct() {
@@ -22,6 +22,9 @@ final class LWP_Plugin {
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_enqueue_scripts', [$this, 'admin_assets']);
         add_shortcode('lucky_wheel_pro', [$this, 'shortcode']);
+        add_action('wp_ajax_lwp_spin', [$this, 'ajax_spin']);
+        add_action('wp_ajax_nopriv_lwp_spin', [$this, 'ajax_spin']);
+        add_action('admin_post_lwp_export_csv', [$this, 'export_csv']);
     }
 
     public function defaults() {
@@ -83,6 +86,7 @@ final class LWP_Plugin {
     public function admin_menu() {
         if (function_exists('s_store_register_submenu')) {
             s_store_register_submenu('lucky-wheel-pro', 'گردونه شانس', [$this, 'settings_page'], 'manage_options', 'گردونه شانس');
+            add_submenu_page('s-store','گزارش گردونه','↳ گزارش گردونه','manage_options','lucky-wheel-pro-logs',[$this,'logs_page']);
             return;
         }
         add_menu_page(
@@ -94,6 +98,7 @@ final class LWP_Plugin {
             'dashicons-tickets-alt',
             60
         );
+        add_submenu_page('lucky-wheel-pro','گزارش','گزارش','manage_options','lucky-wheel-pro-logs',[$this,'logs_page']);
     }
 
     public function admin_assets($hook) {
@@ -169,8 +174,9 @@ final class LWP_Plugin {
                     </section>
 
                     <section class="lwp-card">
-                        <h2>وضعیت توسعه</h2>
-                        <p>ساختار افزونه، تنظیمات کمپین و جوایز آماده است. ثبت اسپین، CSV، پیامک و Elementor در نسخه‌های بعدی همین Repo تکمیل می‌شود.</p>
+                        <h2>گزارش و خروجی</h2>
+                        <p>Spinها ثبت می‌شوند، موجودی جایزه کم می‌شود و هر شماره موبایل روزانه یک بار می‌تواند شرکت کند.</p>
+                        <a class="button" href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=lwp_export_csv'),'lwp_export_csv')); ?>">دانلود CSV</a>
                     </section>
                 </div>
                 <?php submit_button('ذخیره تنظیمات'); ?>
@@ -210,10 +216,11 @@ final class LWP_Plugin {
                     <input type="tel" inputmode="numeric" placeholder="شماره موبایل">
                 <?php endif; ?>
 
-                <button type="button">چرخاندن گردونه</button>
+                <button type="button" class="lwp-spin-btn">چرخاندن گردونه</button><div class="lwp-result" aria-live="polite"></div>
             </div>
         </div>
 
+        <script>(function(){const root=document.currentScript.parentElement;const btn=root.querySelector(".lwp-spin-btn");if(!btn)return;btn.addEventListener("click",async()=>{const mobile=root.querySelector("input[type=tel]")?.value||"";btn.disabled=true;btn.textContent="در حال چرخش…";try{const body=new URLSearchParams({action:"lwp_spin",nonce:"<?php echo esc_js(wp_create_nonce("lwp_spin")); ?>",mobile});const r=await fetch("<?php echo esc_url(admin_url("admin-ajax.php")); ?>",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body,credentials:"same-origin"});const j=await r.json();root.querySelector(".lwp-result").textContent=j.success?j.data.message:(j.data?.message||"خطا");}catch(e){root.querySelector(".lwp-result").textContent="خطا در ارتباط";}finally{btn.disabled=false;btn.textContent="چرخاندن گردونه";}});})();</script>
         <style>
             .lwp-wheel{direction:rtl;text-align:center}
             .lwp-wheel-card{max-width:420px;margin:auto;padding:22px;border:1px solid #e5e7eb;border-radius:20px;background:#fff}
@@ -225,7 +232,74 @@ final class LWP_Plugin {
         </style>
         <?php
         return ob_get_clean();
+    }    private function eligible_by_order($min_amount) {
+        if ($min_amount <= 0) return true;
+        if (!is_user_logged_in() || !function_exists('wc_get_orders')) return false;
+        $orders = wc_get_orders(['customer_id'=>get_current_user_id(),'status'=>['wc-completed','wc-processing'],'limit'=>10,'return'=>'objects']);
+        foreach($orders as $order) if((float)$order->get_total() >= $min_amount) return true;
+        return false;
     }
+
+    private function choose_prize($prizes) {
+        $pool=[]; $total=0.0;
+        foreach($prizes as $i=>$p){
+            $chance=max(0,(float)($p['chance']??0)); $stock=(int)($p['stock']??0);
+            if($chance<=0||$stock<=0) continue;
+            $total += $chance; $pool[]=['i'=>$i,'end'=>$total];
+        }
+        if($total<=0||!$pool) return null;
+        $r=(random_int(1,1000000)/1000000)*$total;
+        foreach($pool as $x) if($r <= $x['end']) return $x['i'];
+        return $pool[count($pool)-1]['i'];
+    }
+
+    public function ajax_spin() {
+        check_ajax_referer('lwp_spin','nonce');
+        if(!$this->campaign_active()) wp_send_json_error(['message'=>'کمپین فعال نیست.']);
+        $s=$this->settings();
+        $mobile=preg_replace('/\D+/','',wp_unslash($_POST['mobile']??''));
+        if('yes'===$s['require_mobile'] && strlen($mobile)<10) wp_send_json_error(['message'=>'شماره موبایل معتبر وارد کنید.']);
+        if(!$this->eligible_by_order((float)$s['min_order_amount'])) wp_send_json_error(['message'=>'شرط حداقل خرید برای شرکت در گردونه برقرار نیست.']);
+
+        $key='lwp_spin_'.md5($mobile ?: ('u'.get_current_user_id().'|'.($_SERVER['REMOTE_ADDR']??''))).'_'.wp_date('Ymd');
+        if(get_transient($key)) wp_send_json_error(['message'=>'امروز قبلاً در گردونه شرکت کرده‌اید.']);
+
+        $settings=get_option(self::OPTION,[]);
+        $prizes=wp_parse_args($settings,$this->defaults())['prizes'];
+        $idx=$this->choose_prize($prizes);
+        if(null===$idx) wp_send_json_error(['message'=>'جایزه قابل ارائه‌ای باقی نمانده است.']);
+
+        $prize=$prizes[$idx];
+        $prizes[$idx]['stock']=max(0,(int)$prizes[$idx]['stock']-1);
+        $settings['prizes']=$prizes; update_option(self::OPTION,$settings,false);
+        set_transient($key,1,DAY_IN_SECONDS);
+
+        $logs=(array)get_option('lwp_spin_logs',[]);
+        $logs[]=['time'=>current_time('mysql'),'mobile'=>$mobile,'user_id'=>get_current_user_id(),'prize'=>$prize['title'],'ip'=>sanitize_text_field($_SERVER['REMOTE_ADDR']??'')];
+        if(count($logs)>2000) $logs=array_slice($logs,-2000);
+        update_option('lwp_spin_logs',$logs,false);
+
+        wp_send_json_success(['prize'=>$prize['title'],'message'=>'تبریک! '.$prize['title'].' برنده شدید.']);
+    }
+
+    public function logs_page() {
+        if(!current_user_can('manage_options')) return;
+        $logs=array_reverse((array)get_option('lwp_spin_logs',[]));
+        echo '<div class="wrap"><h1>گزارش گردونه شانس</h1><p><a class="button" href="'.esc_url(wp_nonce_url(admin_url('admin-post.php?action=lwp_export_csv'),'lwp_export_csv')).'">خروجی CSV</a></p><table class="widefat striped"><thead><tr><th>زمان</th><th>موبایل</th><th>جایزه</th><th>کاربر</th></tr></thead><tbody>';
+        foreach(array_slice($logs,0,500) as $x) echo '<tr><td>'.esc_html($x['time']).'</td><td>'.esc_html($x['mobile']).'</td><td>'.esc_html($x['prize']).'</td><td>'.esc_html($x['user_id']).'</td></tr>';
+        echo '</tbody></table></div>';
+    }
+
+    public function export_csv() {
+        if(!current_user_can('manage_options')) wp_die('دسترسی غیرمجاز');
+        check_admin_referer('lwp_export_csv');
+        header('Content-Type: text/csv; charset=utf-8'); header('Content-Disposition: attachment; filename=lucky-wheel-spins.csv');
+        $out=fopen('php://output','w'); fwrite($out,"\xEF\xBB\xBF"); fputcsv($out,['time','mobile','prize','user_id']);
+        foreach((array)get_option('lwp_spin_logs',[]) as $x) fputcsv($out,[$x['time'],$x['mobile'],$x['prize'],$x['user_id']]);
+        fclose($out); exit;
+    }
+
+
 }
 
 new LWP_Plugin();
